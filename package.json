@@ -1,6 +1,6 @@
 {
   "name": "prettier-differ",
-  "version": "0.1.4",
+  "version": "0.1.0",
   "homepage": "https://github.com/orientalperil/prettier-differ",
   "type": "module",
   "bin": {
