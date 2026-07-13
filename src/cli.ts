@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { execFileSync } from "child_process"
+import { execFileSync, spawnSync } from "child_process"
 import * as fs from "fs"
 import * as os from "os"
 import * as path from "path"
@@ -29,21 +29,44 @@ function getChangedFiles(): string[] {
     .filter(Boolean)
 }
 
-function diffFormatted(file: string, tmpFile: string): void {
+function getFormattedDiff(file: string, tmpFile: string): string | null {
   let formatted: string
   try {
     formatted = run("npx", ["prettier", file])
   } catch {
     console.error(`Skipping ${file} — prettier failed to format it.`)
-    return
+    return null
   }
 
   fs.writeFileSync(tmpFile, formatted)
 
   try {
-    run("git", ["diff", "--no-index", "--", file, tmpFile], { stdio: "inherit" })
-  } catch {
-    // git diff --no-index exits 1 when there are differences — expected, not an error
+    // No diff — exits 0, stdout is empty
+    return run("git", ["diff", "--no-index", "--color=always", "--", file, tmpFile])
+  } catch (err) {
+    // git diff --no-index exits 1 when there are differences — expected, not an error.
+    // The diff text is on stdout of the thrown error.
+    const stdout = (err as { stdout?: Buffer | string }).stdout
+    return stdout ? stdout.toString() : ""
+  }
+}
+
+function showInPager(text: string): void {
+  if (!text.trim()) {
+    console.log("No formatting differences found.")
+    return
+  }
+
+  const [pagerCmd, ...pagerArgs] = (process.env.PAGER || "less -R").split(" ")
+
+  const result = spawnSync(pagerCmd, pagerArgs, {
+    input: text,
+    stdio: ["pipe", "inherit", "inherit"],
+  })
+
+  if (result.error) {
+    // Fall back to plain stdout if no pager is available
+    process.stdout.write(text)
   }
 }
 
@@ -56,10 +79,16 @@ function main(): void {
   }
 
   const tmpFile = path.join(os.tmpdir(), "pf-diff-tmp")
+  const diffs: string[] = []
 
   for (const file of files) {
-    diffFormatted(file, tmpFile)
+    const diff = getFormattedDiff(file, tmpFile)
+    if (diff) {
+      diffs.push(diff)
+    }
   }
+
+  showInPager(diffs.join(""))
 }
 
 main()
